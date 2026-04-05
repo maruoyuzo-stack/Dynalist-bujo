@@ -6,7 +6,6 @@ app = Flask(__name__)
 
 TOKEN = "i6L0LFDkM7GojePgYmclsdM0T5WcwCr_8zaugOvfaEOZpf36pecJGpQeFN9e_CpXkIeqDZK4evfw7gE8JOEBOfsZKXNKhz3swE1t96vHb2d4SPC-cdjnrNw7lABVU5Nh"
 
-# 日本語曜日
 WEEKDAY = ["月","火","水","木","金","土","日"]
 
 @app.route("/")
@@ -36,9 +35,15 @@ def main():
         if not bujo:
             return "Bujo folder not found"
 
-        # ---------- ④ 月フォルダ取得 or 作成 ----------
-        month_folder = next((f for f in files if f["title"] == month_str and f["type"] == "folder"), None)
+        # ---------- ④ Bujo配下の月フォルダ取得 ----------
+        month_folder = None
+        for child_id in bujo.get("children", []):
+            f = next((x for x in files if x["id"] == child_id), None)
+            if f and f["title"] == month_str and f["type"] == "folder":
+                month_folder = f
+                break
 
+        # ---------- ⑤ 月フォルダなければ作成 ----------
         if not month_folder:
             create_res = requests.post(
                 "https://dynalist.io/api/v1/file/create",
@@ -51,12 +56,13 @@ def main():
             )
             month_folder = create_res.json()["file"]
 
-        # ---------- ⑤ 前日のドキュメント取得 ----------
+        # ---------- ⑥ 前日のドキュメント取得 ----------
         source = next((f for f in files if f["title"] == yesterday_str), None)
 
-        # ---------- ⑥ 見つからない場合（保険） ----------
+        # ---------- ⑦ fallback（Bujo配下から最新探す） ----------
         if not source:
             candidates = []
+
             for m_id in bujo.get("children", []):
                 m = next((f for f in files if f["id"] == m_id), None)
                 if m and "children" in m:
@@ -68,10 +74,12 @@ def main():
             if not candidates:
                 return "no source found"
 
+            # IDベースで安定ソート（Dynalistは時系列に近い）
+            candidates.sort(key=lambda x: x["id"])
             source = candidates[-1]
 
-        # ---------- ⑦ コピー ----------
-        requests.post(
+        # ---------- ⑧ コピー実行 ----------
+        copy_res = requests.post(
             "https://dynalist.io/api/v1/doc/copy",
             json={
                 "token": TOKEN,
@@ -79,6 +87,10 @@ def main():
                 "parent_id": month_folder["id"]
             }
         )
+
+        # ---------- ⑨ 念のためレスポンスチェック ----------
+        if copy_res.status_code != 200:
+            return f"copy failed: {copy_res.text}"
 
         return "ok"
 
