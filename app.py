@@ -18,27 +18,32 @@ def main():
         yesterday_str = yesterday.strftime("%Y/%m/%d") + f"({WEEKDAY[yesterday.weekday()]})"
         month_str = today.strftime("%Y/%m")
 
-        # ---------- ファイル一覧 ----------
+        # ---------- ① ファイル一覧 ----------
         res = requests.post(
             "https://dynalist.io/api/v1/file/list",
             json={"token": TOKEN}
         )
-        files = res.json()["files"]
+        data = res.json()
+        files = data["files"]
 
-        # ---------- 今日チェック ----------
+        # ---------- ② 今日の存在チェック ----------
         if any(f["title"] == today_str for f in files):
-            return "skip"
+            return "skip (already exists)"
 
-        # ---------- Bujo ----------
+        # ---------- ③ Bujoフォルダ ----------
         bujo = next((f for f in files if f["title"] == "Bujo" and f["type"] == "folder"), None)
+        if not bujo:
+            return "Bujo folder not found"
 
-        # ---------- 月フォルダ ----------
+        # ---------- ④ 月フォルダ（Bujo配下限定） ----------
         month_folder = None
         for cid in bujo.get("children", []):
             f = next((x for x in files if x["id"] == cid), None)
-            if f and f["title"] == month_str:
+            if f and f["title"] == month_str and f["type"] == "folder":
                 month_folder = f
+                break
 
+        # ---------- ⑤ 月フォルダ作成 ----------
         if not month_folder:
             create_res = requests.post(
                 "https://dynalist.io/api/v1/file/create",
@@ -49,14 +54,22 @@ def main():
                     "parent_id": bujo["id"]
                 }
             )
-            month_folder = create_res.json()["file"]
+            res_json = create_res.json()
 
-        # ---------- 前日ドキュメント ----------
+            if res_json.get("_code") != "Ok":
+                return f"month folder create error: {res_json}"
+
+            month_folder = {
+                "id": res_json.get("file_id"),
+                "title": month_str
+            }
+
+        # ---------- ⑥ 前日ドキュメント ----------
         source = next((f for f in files if f["title"] == yesterday_str), None)
         if not source:
-            return "no source"
+            return "no source document"
 
-        # ---------- 中身取得 ----------
+        # ---------- ⑦ 中身取得 ----------
         doc_res = requests.post(
             "https://dynalist.io/api/v1/doc/read",
             json={
@@ -64,11 +77,14 @@ def main():
                 "file_id": source["id"]
             }
         )
-        doc = doc_res.json()
+        doc_json = doc_res.json()
 
-        nodes = doc["nodes"]
+        if doc_json.get("_code") != "Ok":
+            return f"doc read error: {doc_json}"
 
-        # ---------- 新規作成 ----------
+        nodes = doc_json.get("nodes", [])
+
+        # ---------- ⑧ 新規ドキュメント作成 ----------
         create_doc_res = requests.post(
             "https://dynalist.io/api/v1/file/create",
             json={
@@ -78,25 +94,42 @@ def main():
                 "parent_id": month_folder["id"]
             }
         )
-        new_file = create_doc_res.json()["file"]
 
-        # ---------- ノードコピー ----------
-        requests.post(
-            "https://dynalist.io/api/v1/doc/edit",
-            json={
-                "token": TOKEN,
-                "file_id": new_file["id"],
-                "changes": [
-                    {
-                        "action": "insert",
-                        "parent_id": None,
-                        "index": 0,
-                        "content": n["content"]
-                    }
-                    for n in nodes if n.get("content")
-                ]
-            }
-        )
+        res_json = create_doc_res.json()
+
+        if res_json.get("_code") != "Ok":
+            return f"document create error: {res_json}"
+
+        new_file_id = res_json.get("file_id")
+
+        if not new_file_id:
+            return f"no file_id returned: {res_json}"
+
+        # ---------- ⑨ ノードコピー ----------
+        changes = []
+        for n in nodes:
+            content = n.get("content")
+            if content:
+                changes.append({
+                    "action": "insert",
+                    "parent_id": None,
+                    "index": -1,
+                    "content": content
+                })
+
+        if changes:
+            edit_res = requests.post(
+                "https://dynalist.io/api/v1/doc/edit",
+                json={
+                    "token": TOKEN,
+                    "file_id": new_file_id,
+                    "changes": changes
+                }
+            )
+
+            edit_json = edit_res.json()
+            if edit_json.get("_code") != "Ok":
+                return f"edit error: {edit_json}"
 
         return "ok"
 
