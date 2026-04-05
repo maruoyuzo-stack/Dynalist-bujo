@@ -1,107 +1,81 @@
 from flask import Flask
 import requests
-import datetime
-import os
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-API_TOKEN = os.environ.get("DYNALIST_TOKEN")
-BUJO_FOLDER_NAME = "Bujo"
-
-def log(msg):
-    print(msg)
-
-def make_date_str(dt):
-    weekdays = ["月","火","水","木","金","土","日"]
-    return dt.strftime("%Y/%m/%d") + f"({weekdays[dt.weekday()]})"
-
-def make_month_str(dt):
-    return dt.strftime("%Y/%m")
+TOKEN = i6L0LFDkM7GojePgYmclsdM0T5WcwCr_8zaugOvfaEOZpf36pecJGpQeFN9e_CpXkIeqDZK4evfw7gE8JOEBOfsZKXNKhz3swE1t96vHb2d4SPC-cdjnrNw7lABVU5Nh
 
 @app.route("/")
-def run():
+def main():
     try:
-        today = datetime.datetime.now()
-        yesterday = today - datetime.timedelta(days=1)
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
 
-        today_str = make_date_str(today)
-        yesterday_str = make_date_str(yesterday)
-        month_str = make_month_str(today)
+        today_str = today.strftime("%Y/%m/%d(%a)")
+        yesterday_str = yesterday.strftime("%Y/%m/%d(%a)")
+        month_str = today.strftime("%Y/%m")
 
-        log(f"START {today_str}")
-
+        # ---------- ① ファイル一覧取得 ----------
         res = requests.post(
             "https://dynalist.io/api/v1/file/list",
-            json={"token": API_TOKEN}
+            json={"token": TOKEN}
         )
+        data = res.json()
+        files = data["files"]
 
-#        return str(res.json())
-        
-        files = res.json()["files"]
+        # ---------- ② 今日の存在チェック ----------
+        if any(f["title"] == today_str for f in files):
+            return "skip"
 
-        bujo = next(f for f in files if f["title"] == BUJO_FOLDER_NAME)
+        # ---------- ③ Bujoフォルダ取得 ----------
+        bujo = next((f for f in files if f["title"] == "Bujo" and f["type"] == "folder"), None)
+        if not bujo:
+            return "Bujo folder not found"
 
-        month_folder = next(
-            (f for f in files if f["title"] == month_str and f.get("parent_id") == bujo["id"]),
-            None
-        )
+        # ---------- ④ 月フォルダ取得 or 作成 ----------
+        month_folder = next((f for f in files if f["title"] == month_str and f["type"] == "folder"), None)
 
         if not month_folder:
-            res = requests.post(
+            create_res = requests.post(
                 "https://dynalist.io/api/v1/file/create",
                 json={
-                    "token": API_TOKEN,
+                    "token": TOKEN,
                     "title": month_str,
+                    "type": "folder",
                     "parent_id": bujo["id"]
                 }
             )
-            month_folder = {"id": res.json()["file_id"]}
+            month_folder = create_res.json()["file"]
 
-#        for f in files:
-#            if f["title"] == today_str and f.get("parent_id") == month_folder["id"]:
-#                return "skip"
-
-#       今日存在チェック
-        if any(f["title"] == today_str for f in files):
-            return "skip"
-    
+        # ---------- ⑤ 前日のドキュメント取得 ----------
         source = next((f for f in files if f["title"] == yesterday_str), None)
 
+        # ---------- ⑥ 見つからない場合（保険） ----------
         if not source:
-            files.sort(key=lambda x: x.get("updated", 0), reverse=True)
-            source = files[0]
+            # Bujo配下から全部集める
+            candidates = []
+            for m_id in bujo.get("children", []):
+                m = next((f for f in files if f["id"] == m_id), None)
+                if m and "children" in m:
+                    for cid in m["children"]:
+                        child = next((f for f in files if f["id"] == cid), None)
+                        if child and child["type"] == "document":
+                            candidates.append(child)
 
-        res = requests.post(
-            "https://dynalist.io/api/v1/doc/read",
-            json={"token": API_TOKEN, "file_id": source["id"]}
-        )
-        nodes = res.json()["nodes"]
+            if not candidates:
+                return "no source found"
 
-        nodes = [n for n in nodes if not n.get("checked", False)]
-        for n in nodes:
-            n.pop("id", None)
+            # 適当に一番新しそうなの
+            source = candidates[-1]
 
-        res = requests.post(
-            "https://dynalist.io/api/v1/doc/create",
-            json={
-                "token": API_TOKEN,
-                "title": today_str,
-                "parent_id": month_folder["id"]
-            }
-        )
-        new_id = res.json()["file_id"]
-
+        # ---------- ⑦ コピー ----------
         requests.post(
-            "https://dynalist.io/api/v1/doc/edit",
+            "https://dynalist.io/api/v1/doc/copy",
             json={
-                "token": API_TOKEN,
-                "file_id": new_id,
-                "changes": [{
-                    "action": "insert",
-                    "parent_id": "root",
-                    "index": 0,
-                    "nodes": nodes
-                }]
+                "token": TOKEN,
+                "file_id": source["id"],
+                "parent_id": month_folder["id"]
             }
         )
 
@@ -109,6 +83,7 @@ def run():
 
     except Exception as e:
         return str(e)
+
 
 if __name__ == "__main__":
     app.run()
