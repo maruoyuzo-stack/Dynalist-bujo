@@ -64,7 +64,7 @@ def run():
 #       今日存在チェック
         if any(f["title"] == today_str for f in files):
             return "skip"
-
+    
         source = next((f for f in files if f["title"] == yesterday_str), None)
 
         if not source:
