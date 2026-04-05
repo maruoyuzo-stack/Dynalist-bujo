@@ -57,9 +57,13 @@ def run():
             )
             month_folder = {"id": res.json()["file_id"]}
 
-        for f in files:
-            if f["title"] == today_str and f.get("parent_id") == month_folder["id"]:
-                return "skip"
+#        for f in files:
+#            if f["title"] == today_str and f.get("parent_id") == month_folder["id"]:
+#                return "skip"
+
+#       今日存在チェック
+        if any(f["title"] == today_str for f in files):
+        return "skip"
 
         source = next((f for f in files if f["title"] == yesterday_str), None)
 
