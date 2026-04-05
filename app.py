@@ -6,14 +6,17 @@ app = Flask(__name__)
 
 TOKEN = "i6L0LFDkM7GojePgYmclsdM0T5WcwCr_8zaugOvfaEOZpf36pecJGpQeFN9e_CpXkIeqDZK4evfw7gE8JOEBOfsZKXNKhz3swE1t96vHb2d4SPC-cdjnrNw7lABVU5Nh"
 
+# 日本語曜日
+WEEKDAY = ["月","火","水","木","金","土","日"]
+
 @app.route("/")
 def main():
     try:
         today = datetime.now()
         yesterday = today - timedelta(days=1)
 
-        today_str = today.strftime("%Y/%m/%d(%a)")
-        yesterday_str = yesterday.strftime("%Y/%m/%d(%a)")
+        today_str = today.strftime("%Y/%m/%d") + f"({WEEKDAY[today.weekday()]})"
+        yesterday_str = yesterday.strftime("%Y/%m/%d") + f"({WEEKDAY[yesterday.weekday()]})"
         month_str = today.strftime("%Y/%m")
 
         # ---------- ① ファイル一覧取得 ----------
@@ -53,7 +56,6 @@ def main():
 
         # ---------- ⑥ 見つからない場合（保険） ----------
         if not source:
-            # Bujo配下から全部集める
             candidates = []
             for m_id in bujo.get("children", []):
                 m = next((f for f in files if f["id"] == m_id), None)
@@ -66,7 +68,6 @@ def main():
             if not candidates:
                 return "no source found"
 
-            # 適当に一番新しそうなの
             source = candidates[-1]
 
         # ---------- ⑦ コピー ----------
