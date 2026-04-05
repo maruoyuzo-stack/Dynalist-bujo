@@ -35,7 +35,7 @@ def run():
             json={"token": API_TOKEN}
         )
 
-        return str(res.json())
+#        return str(res.json())
         
         files = res.json()["files"]
 
