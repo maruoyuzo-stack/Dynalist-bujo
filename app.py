@@ -18,38 +18,28 @@ def main():
         yesterday_str = yesterday.strftime("%Y/%m/%d") + f"({WEEKDAY[yesterday.weekday()]})"
         month_str = today.strftime("%Y/%m")
 
-        log = []
-
         # ---------- ファイル一覧 ----------
         res = requests.post(
             "https://dynalist.io/api/v1/file/list",
             json={"token": TOKEN}
         )
-        data = res.json()
-        files = data["files"]
-
-        log.append(f"today={today_str}")
-        log.append(f"yesterday={yesterday_str}")
+        files = res.json()["files"]
 
         # ---------- 今日チェック ----------
         if any(f["title"] == today_str for f in files):
-            return "skip (already exists)"
+            return "skip"
 
         # ---------- Bujo ----------
         bujo = next((f for f in files if f["title"] == "Bujo" and f["type"] == "folder"), None)
-        log.append(f"bujo_id={bujo['id'] if bujo else 'None'}")
 
         # ---------- 月フォルダ ----------
         month_folder = None
         for cid in bujo.get("children", []):
             f = next((x for x in files if x["id"] == cid), None)
-            if f:
-                log.append(f"child={f['title']}")
             if f and f["title"] == month_str:
                 month_folder = f
 
         if not month_folder:
-            log.append("month folder NOT found → creating")
             create_res = requests.post(
                 "https://dynalist.io/api/v1/file/create",
                 json={
@@ -59,34 +49,56 @@ def main():
                     "parent_id": bujo["id"]
                 }
             )
-            log.append(f"create_res={create_res.text}")
             month_folder = create_res.json()["file"]
 
-        log.append(f"month_id={month_folder['id']}")
-
-        # ---------- コピー元 ----------
+        # ---------- 前日ドキュメント ----------
         source = next((f for f in files if f["title"] == yesterday_str), None)
-
         if not source:
-            log.append("yesterday NOT found → fallback")
-            source = files[-1]
+            return "no source"
 
-        log.append(f"source={source['title']} id={source['id']}")
-
-        # ---------- コピー ----------
-        copy_res = requests.post(
-            "https://dynalist.io/api/v1/doc/copy",
+        # ---------- 中身取得 ----------
+        doc_res = requests.post(
+            "https://dynalist.io/api/v1/doc/read",
             json={
                 "token": TOKEN,
-                "file_id": source["id"],
+                "file_id": source["id"]
+            }
+        )
+        doc = doc_res.json()
+
+        nodes = doc["nodes"]
+
+        # ---------- 新規作成 ----------
+        create_doc_res = requests.post(
+            "https://dynalist.io/api/v1/file/create",
+            json={
+                "token": TOKEN,
+                "title": today_str,
+                "type": "document",
                 "parent_id": month_folder["id"]
             }
         )
+        new_file = create_doc_res.json()["file"]
 
-        log.append(f"copy_status={copy_res.status_code}")
-        log.append(f"copy_res={copy_res.text}")
+        # ---------- ノードコピー ----------
+        requests.post(
+            "https://dynalist.io/api/v1/doc/edit",
+            json={
+                "token": TOKEN,
+                "file_id": new_file["id"],
+                "changes": [
+                    {
+                        "action": "insert",
+                        "parent_id": None,
+                        "index": 0,
+                        "content": n["content"]
+                    }
+                    for n in nodes if n.get("content")
+                ]
+            }
+        )
 
-        return "\n".join(log)
+        return "ok"
 
     except Exception as e:
         return str(e)
