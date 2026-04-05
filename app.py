@@ -18,7 +18,9 @@ def main():
         yesterday_str = yesterday.strftime("%Y/%m/%d") + f"({WEEKDAY[yesterday.weekday()]})"
         month_str = today.strftime("%Y/%m")
 
-        # ---------- ① ファイル一覧取得 ----------
+        log = []
+
+        # ---------- ファイル一覧 ----------
         res = requests.post(
             "https://dynalist.io/api/v1/file/list",
             json={"token": TOKEN}
@@ -26,25 +28,28 @@ def main():
         data = res.json()
         files = data["files"]
 
-        # ---------- ② 今日の存在チェック ----------
+        log.append(f"today={today_str}")
+        log.append(f"yesterday={yesterday_str}")
+
+        # ---------- 今日チェック ----------
         if any(f["title"] == today_str for f in files):
-            return "skip"
+            return "skip (already exists)"
 
-        # ---------- ③ Bujoフォルダ取得 ----------
+        # ---------- Bujo ----------
         bujo = next((f for f in files if f["title"] == "Bujo" and f["type"] == "folder"), None)
-        if not bujo:
-            return "Bujo folder not found"
+        log.append(f"bujo_id={bujo['id'] if bujo else 'None'}")
 
-        # ---------- ④ Bujo配下の月フォルダ取得 ----------
+        # ---------- 月フォルダ ----------
         month_folder = None
-        for child_id in bujo.get("children", []):
-            f = next((x for x in files if x["id"] == child_id), None)
-            if f and f["title"] == month_str and f["type"] == "folder":
+        for cid in bujo.get("children", []):
+            f = next((x for x in files if x["id"] == cid), None)
+            if f:
+                log.append(f"child={f['title']}")
+            if f and f["title"] == month_str:
                 month_folder = f
-                break
 
-        # ---------- ⑤ 月フォルダなければ作成 ----------
         if not month_folder:
+            log.append("month folder NOT found → creating")
             create_res = requests.post(
                 "https://dynalist.io/api/v1/file/create",
                 json={
@@ -54,31 +59,21 @@ def main():
                     "parent_id": bujo["id"]
                 }
             )
+            log.append(f"create_res={create_res.text}")
             month_folder = create_res.json()["file"]
 
-        # ---------- ⑥ 前日のドキュメント取得 ----------
+        log.append(f"month_id={month_folder['id']}")
+
+        # ---------- コピー元 ----------
         source = next((f for f in files if f["title"] == yesterday_str), None)
 
-        # ---------- ⑦ fallback（Bujo配下から最新探す） ----------
         if not source:
-            candidates = []
+            log.append("yesterday NOT found → fallback")
+            source = files[-1]
 
-            for m_id in bujo.get("children", []):
-                m = next((f for f in files if f["id"] == m_id), None)
-                if m and "children" in m:
-                    for cid in m["children"]:
-                        child = next((f for f in files if f["id"] == cid), None)
-                        if child and child["type"] == "document":
-                            candidates.append(child)
+        log.append(f"source={source['title']} id={source['id']}")
 
-            if not candidates:
-                return "no source found"
-
-            # IDベースで安定ソート（Dynalistは時系列に近い）
-            candidates.sort(key=lambda x: x["id"])
-            source = candidates[-1]
-
-        # ---------- ⑧ コピー実行 ----------
+        # ---------- コピー ----------
         copy_res = requests.post(
             "https://dynalist.io/api/v1/doc/copy",
             json={
@@ -88,11 +83,10 @@ def main():
             }
         )
 
-        # ---------- ⑨ 念のためレスポンスチェック ----------
-        if copy_res.status_code != 200:
-            return f"copy failed: {copy_res.text}"
+        log.append(f"copy_status={copy_res.status_code}")
+        log.append(f"copy_res={copy_res.text}")
 
-        return "ok"
+        return "\n".join(log)
 
     except Exception as e:
         return str(e)
