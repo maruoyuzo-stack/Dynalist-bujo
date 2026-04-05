@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: dynalist-bujo
+    runtime: python
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DYNALIST_TOKEN
+        sync: false
