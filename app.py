@@ -34,6 +34,9 @@ def run():
             "https://dynalist.io/api/v1/file/list",
             json={"token": API_TOKEN}
         )
+
+        return str(res.json())
+        
         files = res.json()["files"]
 
         bujo = next(f for f in files if f["title"] == BUJO_FOLDER_NAME)
