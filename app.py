@@ -1,3 +1,4 @@
+"""
 from flask import Flask
 import requests
 from datetime import datetime, timedelta
@@ -135,6 +136,34 @@ def main():
 
     except Exception as e:
         return str(e)
+        """
+from flask import Flask
+import requests
+
+app = Flask(__name__)
+
+TOKEN = "ここにDynalistのトークン"
+
+@app.route("/")
+def test_create():
+    try:
+        res = requests.post(
+            "https://dynalist.io/api/v1/file/create",
+            json={
+                "token": TOKEN,
+                "title": "TEST_DOCUMENT",
+                "type": "document"
+            }
+        )
+
+        return res.text
+
+    except Exception as e:
+        return str(e)
+
+
+if __name__ == "__main__":
+    app.run()
 
 
 if __name__ == "__main__":
